@@ -1,0 +1,26 @@
+streamlit
+
+# Utilities
+numpy<2
+pandas<3
+scipy<1.17
+pyarrow<20
+
+# Face Recognition
+scikit-learn
+dlib-bin
+git+https://github.com/ageitgey/face_recognition_models
+setuptools<70.0.0
+
+# Database and Security
+supabase
+bcrypt
+
+# QR Code
+segno
+pillow
+
+# Audio Processing
+librosa<0.12
+
+# WebRTC Voice Activity Detection (prebuilt wheels)
