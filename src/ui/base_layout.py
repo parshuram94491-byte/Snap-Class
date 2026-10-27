@@ -1120,11 +1120,16 @@ def style_base_layout():
                 margin-inline: auto !important;
             }
 
-            /* Keep the live camera in natural orientation; snapshots remain untransformed. */
+            /* Mirror live previews like a selfie view without changing captured images. */
             [data-testid="stDialog"] [role="dialog"]:has(.photo-upload-dialog) .st-key-dialog_cam video,
             [data-testid="stDialog"] [role="dialog"]:has(.photo-upload-dialog) [data-testid="stCameraInput"] video {
-                transform: none !important;
-                -webkit-transform: none !important;
+                transform: scaleX(-1) !important;
+                -webkit-transform: scaleX(-1) !important;
+            }
+
+            [data-testid="stCameraInput"] video {
+                transform: scaleX(-1) !important;
+                -webkit-transform: scaleX(-1) !important;
             }
 
             [data-testid="stDialog"] [data-testid="stMarkdownContainer"],

@@ -1,3 +1,5 @@
+import logging
+
 import streamlit as st
 
 from src.ui.base_layout import style_background_dashboard, style_base_layout
@@ -13,6 +15,8 @@ import time
 
 from src.components.dialog_enroll import enroll_dialog
 from src.components.subject_card import subject_card
+
+logger = logging.getLogger(__name__)
 
 def student_dashboard():
     student_data = st.session_state.student_data
@@ -120,13 +124,19 @@ def student_screen():
     photo_source = st.camera_input("Position your face in the center")
 
     if photo_source:
-        img = np.array(Image.open(photo_source).convert("RGB"))
-
         try:
+            img = np.asarray(Image.open(photo_source).convert("RGB"), dtype=np.uint8)
             with st.spinner('AI is scanning..'):
                 detected, all_ids, num_faces = predict_attendance(img)
-        except (ValueError, RuntimeError) as exc:
-            st.error(f"Could not process the face image: {exc}")
+        except Exception:
+            logger.exception(
+                "Student face sign-in failed in "
+                "src.screens.student_screen.student_screen"
+            )
+            st.error(
+                "Face recognition could not be completed. Please retry; "
+                "if it continues, contact support."
+            )
             return
 
         if num_faces == 0:
@@ -168,11 +178,21 @@ def student_screen():
             if st.button('Create Account', type='primary'):
                 if new_name:
                     with st.spinner('Creating profile..'):
-                        img = np.array(Image.open(photo_source).convert("RGB"))
                         try:
+                            img = np.asarray(
+                                Image.open(photo_source).convert("RGB"),
+                                dtype=np.uint8,
+                            )
                             encodings = get_face_embeddings(img)
-                        except (ValueError, RuntimeError) as exc:
-                            st.error(f"Could not process the enrollment image: {exc}")
+                        except Exception:
+                            logger.exception(
+                                "Face enrollment image processing failed in "
+                                "src.screens.student_screen.student_screen"
+                            )
+                            st.error(
+                                "Face enrollment could not be completed. Please retry; "
+                                "if it continues, contact support."
+                            )
                             return
 
                         if encodings:
@@ -185,7 +205,18 @@ def student_screen():
                             response_data = create_student(new_name, face_embedding=face_emb, voice_embedding=voice_emb)
 
                             if response_data:
-                                train_classifier()
+                                try:
+                                    train_classifier()
+                                except Exception:
+                                    logger.exception(
+                                        "Face classifier initialization failed in "
+                                        "src.screens.student_screen.student_screen"
+                                    )
+                                    st.error(
+                                        "Your profile was saved, but face recognition "
+                                        "could not be initialized. Please contact support."
+                                    )
+                                    return
                                 st.session_state.is_logged_in = True
                                 st.session_state.user_role = 'student'
                                 st.session_state.student_data = response_data[0]

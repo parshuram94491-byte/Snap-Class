@@ -55,13 +55,58 @@ class PrepareDlibImageTests(unittest.TestCase):
         self.assertTrue(np.array_equal(prepared[0, 0], (255, 0, 0)))
         self.assertTrue(np.array_equal(prepared[0, 1], (0, 0, 255)))
 
-    def test_grayscale_uint8_is_preserved(self):
+    def test_grayscale_uint8_is_converted_to_three_rgb_channels(self):
         image = np.arange(15, dtype=np.uint8).reshape(3, 5)
 
         prepared = face_pipeline.prepare_dlib_image(image)
 
-        np.testing.assert_array_equal(prepared, image)
-        self.assertEqual(prepared.shape, image.shape)
+        expected = np.repeat(image[:, :, np.newaxis], 3, axis=2)
+        np.testing.assert_array_equal(prepared, expected)
+        self.assertEqual(prepared.shape, (3, 5, 3))
+        self.assertEqual(prepared.dtype, np.uint8)
+
+    def test_detector_failure_is_logged_with_traceback_and_reraised(self):
+        image = np.zeros((20, 30, 3), dtype=np.uint8)
+
+        with patch.object(
+            face_pipeline,
+            "load_dlib_models",
+            return_value=(
+                lambda *_args: (_ for _ in ()).throw(OSError("detector test failure")),
+                FakeShapePredictor(),
+                FakeFaceRecognizer(),
+            ),
+        ):
+            with self.assertLogs(face_pipeline.logger, level="ERROR") as captured:
+                with self.assertRaisesRegex(OSError, "detector test failure"):
+                    face_pipeline.get_face_embeddings(image)
+
+        self.assertIn(
+            "src.pipelines.face_pipeline.get_face_embeddings",
+            captured.output[0],
+        )
+        self.assertIn("Traceback (most recent call last)", captured.output[0])
+
+    def test_classifier_training_failure_is_logged_and_reraised(self):
+        students = [
+            {"student_id": 101, "face_embedding": np.zeros(128).tolist()},
+            {"student_id": 202, "face_embedding": np.ones(128).tolist()},
+        ]
+        with patch.object(face_pipeline, "get_all_students", return_value=students):
+            with patch.object(
+                face_pipeline.SVC,
+                "fit",
+                side_effect=ValueError("classifier test failure"),
+            ):
+                with self.assertLogs(face_pipeline.logger, level="ERROR") as captured:
+                    with self.assertRaisesRegex(ValueError, "classifier test failure"):
+                        face_pipeline.get_trained_model()
+
+        self.assertIn(
+            "src.pipelines.face_pipeline.get_trained_model",
+            captured.output[0],
+        )
+        self.assertIn("Traceback (most recent call last)", captured.output[0])
 
     def test_rgba_drops_alpha_without_reordering_rgb(self):
         image = np.array([[[11, 22, 33, 44]]], dtype=np.uint8)

@@ -1,4 +1,6 @@
 import logging
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 import numpy as np
 from sklearn.svm import SVC
@@ -14,29 +16,43 @@ FACE_EMBEDDING_DIM = 128
 def load_dlib_models():
     try:
         import dlib
-    except ImportError as exc:
-        raise RuntimeError(
-            "Face recognition requires a compatible dlib installation. "
-            "Check your Python environment and Windows security logs."
-        ) from exc
+        import face_recognition_models
 
-    import face_recognition_models
+        try:
+            models_version = version("face-recognition-models")
+        except PackageNotFoundError:
+            models_version = "unknown"
+        logger.info(
+            "Initializing face models (dlib=%s, face_recognition_models=%s)",
+            getattr(dlib, "__version__", "unknown"),
+            models_version,
+        )
 
-    detector = dlib.get_frontal_face_detector()
+        shape_predictor_path = Path(
+            face_recognition_models.pose_predictor_model_location()
+        )
+        face_recognition_path = Path(
+            face_recognition_models.face_recognition_model_location()
+        )
+        for model_path in (shape_predictor_path, face_recognition_path):
+            if not model_path.is_file() or model_path.stat().st_size == 0:
+                raise FileNotFoundError("A required dlib model file is missing or empty.")
 
-    sp = dlib.shape_predictor(
-        face_recognition_models.pose_predictor_model_location()
-    )
-
-    facerec = dlib.face_recognition_model_v1(
-        face_recognition_models.face_recognition_model_location()
-    )
+        detector = dlib.get_frontal_face_detector()
+        sp = dlib.shape_predictor(str(shape_predictor_path))
+        facerec = dlib.face_recognition_model_v1(str(face_recognition_path))
+    except Exception:
+        logger.exception(
+            "Face model initialization failed in "
+            "src.pipelines.face_pipeline.load_dlib_models"
+        )
+        raise
 
     return detector, sp, facerec
 
 
 def prepare_dlib_image(image_np, color_order="RGB"):
-    """Validate RGB/BGR pixel data without changing its left-to-right orientation."""
+    """Return contiguous uint8 RGB pixels without changing image orientation."""
     image = np.asarray(image_np)
     channels = image.shape[2] if image.ndim == 3 else (1 if image.ndim == 2 else None)
     logger.debug(
@@ -62,6 +78,9 @@ def prepare_dlib_image(image_np, color_order="RGB"):
                 f"Unsupported image shape {image.shape}; expected RGB (3) or "
                 "RGBA (4) channels."
             )
+
+    if image.ndim == 2:
+        image = np.repeat(image[:, :, np.newaxis], 3, axis=2)
 
     if not isinstance(color_order, str) or color_order.upper() not in {"RGB", "BGR"}:
         raise ValueError("color_order must be 'RGB' or 'BGR'.")
@@ -98,7 +117,7 @@ def prepare_dlib_image(image_np, color_order="RGB"):
                 "numeric pixels in a supported 8-bit range."
             )
 
-    if image.ndim == 3 and color_order.upper() == "BGR":
+    if color_order.upper() == "BGR":
         image = image[:, :, ::-1]
 
     return np.ascontiguousarray(image, dtype=np.uint8)
@@ -126,12 +145,14 @@ def get_face_embeddings(image_np, color_order="RGB"):
                     f"expected {FACE_EMBEDDING_DIM} finite values."
                 )
             encodings.append(face_descriptor)
-    except RuntimeError:
+    except Exception:
         logger.exception(
-            "dlib face processing failed: shape=%s dtype=%s channels=%s",
+            "dlib face detection, landmark, or descriptor extraction failed in "
+            "src.pipelines.face_pipeline.get_face_embeddings: "
+            "shape=%s dtype=%s channels=%s",
             image_np.shape,
             image_np.dtype,
-            image_np.shape[2] if image_np.ndim == 3 else 1,
+            image_np.shape[2],
         )
         raise
 
@@ -179,7 +200,11 @@ def get_trained_model():
         try:
             clf.fit(X, y)
         except ValueError:
-            return None
+            logger.exception(
+                "Face classifier training failed in "
+                "src.pipelines.face_pipeline.get_trained_model"
+            )
+            raise
 
     return {"clf": clf, "X": X, "y": y}
 

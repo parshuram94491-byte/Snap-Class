@@ -1,4 +1,5 @@
 import html
+import logging
 
 import streamlit as st
 
@@ -29,6 +30,7 @@ from datetime import datetime
 
 from src.database.config import supabase
 
+logger = logging.getLogger(__name__)
 
 
 def teacher_screen():
@@ -157,10 +159,9 @@ def teacher_tab_take_attendance():
     with c2:
         
         if st.button('Run Face Analysis', width='stretch', type='secondary', icon=':material/analytics:', disabled=not has_photos):
+            all_detected_ids = {}
             try:
                 with st.spinner('Deep scanning classroom photos...'):
-                    all_detected_ids = {}
-
                     for idx, img in enumerate(st.session_state.attendance_images):
                         img_np = np.array(img.convert('RGB'))
                         detected, _, _ = predict_attendance(img_np)
@@ -169,38 +170,46 @@ def teacher_tab_take_attendance():
                             for sid in detected.keys():
                                 student_id = int(sid)
                                 all_detected_ids.setdefault(student_id, []).append(f"Photo {idx+1}")
+            except Exception:
+                logger.exception(
+                    "Face attendance analysis failed in "
+                    "src.screens.teacher_screen.teacher_tab_take_attendance"
+                )
+                st.error(
+                    "Face analysis could not be completed. Please retry; "
+                    "if it continues, contact support."
+                )
+                return
 
-                    enrolled_res = supabase.table('subject_students').select("*, students(*)").eq('subject_id',selected_subject_id ).execute()
-                    enrolled_students = enrolled_res.data
+            enrolled_res = supabase.table('subject_students').select("*, students(*)").eq('subject_id',selected_subject_id ).execute()
+            enrolled_students = enrolled_res.data
 
-                    if not enrolled_students:
-                        st.warning('No students enrolled in this course')
-                    else:
-                        results, attendance_to_log = [], []
-                        current_timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            if not enrolled_students:
+                st.warning('No students enrolled in this course')
+            else:
+                results, attendance_to_log = [], []
+                current_timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
-                        for node in enrolled_students:
-                            student = node['students']
-                            sources = all_detected_ids.get(int(student['student_id']), [])
-                            is_present = len(sources) > 0
+                for node in enrolled_students:
+                    student = node['students']
+                    sources = all_detected_ids.get(int(student['student_id']), [])
+                    is_present = len(sources) > 0
 
-                            results.append({
-                                "Name": student['name'],
-                                "ID": student['student_id'],
-                                "Source": ", ".join(sources) if is_present else "-",
-                                "Status": "✅ Present" if is_present else "❌ Absent"
-                            })
+                    results.append({
+                        "Name": student['name'],
+                        "ID": student['student_id'],
+                        "Source": ", ".join(sources) if is_present else "-",
+                        "Status": "✅ Present" if is_present else "❌ Absent"
+                    })
 
-                            attendance_to_log.append({
-                                'student_id': student['student_id'],
-                                'subject_id': selected_subject_id,
-                                'timestamp': current_timestamp,
-                                'is_present': bool(is_present)
-                            })
+                    attendance_to_log.append({
+                        'student_id': student['student_id'],
+                        'subject_id': selected_subject_id,
+                        'timestamp': current_timestamp,
+                        'is_present': bool(is_present)
+                    })
 
-                        attendance_result_dialog(results, attendance_to_log)
-            except (ValueError, RuntimeError) as exc:
-                st.error(f"Could not process the attendance images: {exc}")
+                attendance_result_dialog(results, attendance_to_log)
 
     with c3:
         if st.button('Use Voice Attendance', type='primary', width='stretch', icon=':material/mic:'):
