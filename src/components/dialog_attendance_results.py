@@ -184,7 +184,6 @@ def show_attendance_result(df, logs, allow_manual_correction=True):
 
     with st.container(
         key="attendance-review-list",
-        height="stretch",
         border=False,
     ):
         with st.container(key="attendance-review-header", border=False):

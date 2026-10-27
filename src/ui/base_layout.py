@@ -959,14 +959,13 @@ def style_base_layout():
             }
 
             [data-testid="stDialog"] [role="dialog"]:has(.attendance-review-container) {
-                display: flex !important;
-                flex-direction: column !important;
+                display: block !important;
                 width: min(920px, calc(100vw - 32px)) !important;
                 max-width: min(920px, calc(100vw - 32px)) !important;
                 max-height: min(760px, calc(100vh - 32px)) !important;
                 max-height: min(760px, calc(100dvh - 32px)) !important;
-                min-height: 0 !important;
-                overflow: hidden !important;
+                overflow-x: hidden !important;
+                overflow-y: auto !important;
                 border-radius: 16px !important;
                 box-shadow: 0 16px 40px rgba(15, 23, 42, 0.16) !important;
             }
@@ -990,55 +989,6 @@ def style_base_layout():
                 background: transparent !important;
                 color: #0F172A !important;
                 padding: 1.1rem 1.5rem 1.25rem !important;
-            }
-
-            [data-testid="stDialog"] [role="dialog"]:has(.attendance-review-container) [data-testid="stDialogContent"] {
-                display: flex !important;
-                flex: 1 1 auto !important;
-                flex-direction: column !important;
-                min-height: 0 !important;
-                overflow: hidden !important;
-                padding: 0.5rem 1.375rem 0 !important;
-            }
-
-            [data-testid="stDialog"] [role="dialog"]:has(.attendance-review-container) > div {
-                display: flex !important;
-                flex: 1 1 auto !important;
-                flex-direction: column !important;
-                width: 100% !important;
-                min-width: 0 !important;
-                min-height: 0 !important;
-                overflow: hidden !important;
-                padding: 0.5rem 1.375rem 0 !important;
-            }
-
-            [data-testid="stDialog"] [role="dialog"]:has(.attendance-review-container) > div > [data-testid="stVerticalBlock"] {
-                display: flex !important;
-                flex: 1 1 auto !important;
-                flex-direction: column !important;
-                height: 100% !important;
-                min-height: 0 !important;
-                overflow: hidden !important;
-                gap: 0.4rem !important;
-            }
-
-            [data-testid="stDialog"] [role="dialog"]:has(.attendance-review-container) [data-testid="stVerticalBlock"]:has(> [data-testid="stLayoutWrapper"] .st-key-attendance-review-list) {
-                display: flex !important;
-                flex: 1 1 auto !important;
-                flex-direction: column !important;
-                height: 100% !important;
-                min-height: 0 !important;
-                overflow: hidden !important;
-                gap: 0.4rem !important;
-            }
-
-            [data-testid="stDialog"] [role="dialog"]:has(.attendance-review-container) [data-testid="stDialogContent"] > [data-testid="stVerticalBlock"] {
-                display: flex !important;
-                flex: 1 1 auto !important;
-                flex-direction: column !important;
-                height: 100% !important;
-                min-height: 0 !important;
-                gap: 0.4rem !important;
             }
 
             [data-testid="stDialog"] [role="dialog"]:has(.photo-upload-dialog) [data-testid="stSegmentedControl"] {
@@ -1299,21 +1249,8 @@ def style_base_layout():
 
             [data-testid="stDialog"] .st-key-attendance-review-list {
                 box-sizing: border-box !important;
-                flex: 1 1 0% !important;
-                height: 0 !important;
-                min-height: 0 !important;
                 overflow-x: hidden !important;
-                overflow-y: auto !important;
-                scrollbar-gutter: stable;
-            }
-
-            [data-testid="stDialog"] [data-testid="stLayoutWrapper"]:has(.st-key-attendance-review-list) {
-                box-sizing: border-box !important;
-                flex: 1 1 0% !important;
-                height: 0 !important;
-                min-height: 0 !important;
-                max-height: 100% !important;
-                overflow: hidden !important;
+                overflow-y: visible !important;
             }
 
             [data-testid="stDialog"] [class*="st-key-attendance-review-row-"] [data-testid="stHorizontalBlock"] {
@@ -1555,7 +1492,8 @@ def style_base_layout():
                     max-height: calc(100vh - 24px) !important;
                     max-height: calc(100dvh - 24px) !important;
                     margin: auto !important;
-                    overflow: hidden !important;
+                    overflow-x: hidden !important;
+                    overflow-y: auto !important;
                 }
 
                 [data-testid="stDialog"] [role="dialog"]:has(.attendance-review-container) [data-testid="stDialogContent"],
@@ -1564,15 +1502,6 @@ def style_base_layout():
                     box-sizing: border-box !important;
                     min-width: 0 !important;
                     max-width: 100% !important;
-                }
-
-                [data-testid="stDialog"] .st-key-attendance-review-list {
-                    flex: 1 1 0% !important;
-                    height: 0 !important;
-                    min-height: 8rem !important;
-                    overflow-x: hidden !important;
-                    overflow-y: auto !important;
-                    overscroll-behavior: contain !important;
                 }
 
                 .attendance-summary-cards {
@@ -1744,14 +1673,14 @@ def style_base_layout():
 
                 [data-testid="stDialog"] .st-key-attendance-review-footer [data-testid="stHorizontalBlock"] {
                     display: flex !important;
-                    flex-direction: row !important;
-                    gap: 8px !important;
+                    flex-direction: column !important;
+                    gap: 0.5rem !important;
                 }
 
                 [data-testid="stDialog"] .st-key-attendance-review-footer [data-testid="stColumn"] {
-                    width: 50% !important;
+                    width: 100% !important;
                     min-width: 0 !important;
-                    max-width: 50% !important;
+                    max-width: 100% !important;
                 }
             }
 
