@@ -8,7 +8,12 @@ from src.components.header import header_dashboard
 from src.components.footer import footer_dashboard
 from PIL import Image
 import numpy as np
-from src.pipelines.face_pipeline import predict_attendance, get_face_embeddings, train_classifier
+from src.pipelines.face_pipeline import (
+    get_face_embeddings,
+    identify_student,
+    match_registered_face,
+    refresh_face_model,
+)
 from src.pipelines.voice_pipeline import get_voice_embedding
 from src.database.db import get_all_students, create_student, get_student_subjects, get_student_attendance, unenroll_student_to_subject
 import time
@@ -104,9 +109,29 @@ def student_screen():
     style_base_layout()
 
 
-    if "student_data" in st.session_state:
+    student_data = st.session_state.get("student_data")
+    if (
+        st.session_state.get("is_logged_in")
+        and st.session_state.get("user_role") == "student"
+        and isinstance(student_data, dict)
+        and student_data.get("student_id") is not None
+        and student_data.get("name")
+    ):
         student_dashboard()
         return
+    if "student_data" in st.session_state:
+        logger.warning(
+            "Discarding student session data without a valid authenticated student identity."
+        )
+        st.session_state.pop("student_data", None)
+    if (
+        st.session_state.get("is_logged_in")
+        and st.session_state.get("user_role") == "student"
+    ):
+        logger.error("Student session is missing a valid database identity.")
+        st.session_state["is_logged_in"] = False
+        st.session_state["user_role"] = None
+        st.error("Your sign-in session is invalid. Please sign in again.")
     
     c1, c2 = st.columns(2, vertical_alignment='center', gap='xxlarge')
     with c1:
@@ -127,7 +152,7 @@ def student_screen():
         try:
             img = np.asarray(Image.open(photo_source).convert("RGB"), dtype=np.uint8)
             with st.spinner('AI is scanning..'):
-                detected, all_ids, num_faces = predict_attendance(img)
+                match = identify_student(img)
         except Exception:
             logger.exception(
                 "Student face sign-in failed in "
@@ -139,26 +164,36 @@ def student_screen():
             )
             return
 
-        if num_faces == 0:
+        if match["status"] == "no_face":
             st.warning('Face not found!')
-        elif num_faces >1:
+        elif match["status"] == "multiple_faces":
             st.warning('Multiple faces found')
+        elif match["status"] == "ambiguous":
+            st.warning(
+                'This face matches multiple student profiles. Please contact support '
+                'to resolve the duplicate profiles before signing in.'
+            )
+        elif match["status"] == "unknown":
+            st.info('Face not recognized! You might be a new student!')
+            show_registration = True
         else:
-            if detected:
-                student_id = list(detected.keys())[0]
-                all_students = get_all_students()
-                student = next((s for s in all_students if s['student_id']==student_id), None)
+            student = match["student"]
+            if student is None:
+                logger.error(
+                    "Student face sign-in matched without a database identity; refusing login."
+                )
+                st.error(
+                    "The matched student profile could not be loaded. Please retry "
+                    "or contact support."
+                )
+                return
 
-                if student:
-                    st.session_state.is_logged_in = True
-                    st.session_state.user_role = 'student'
-                    st.session_state.student_data = student
-                    st.toast(f'Welcome Back {student['name']}')
-                    time.sleep(1)
-                    st.rerun()
-            else:
-                st.info('Face not recognized! You might be a new student!')
-                show_registration = True
+            st.session_state.is_logged_in = True
+            st.session_state.user_role = 'student'
+            st.session_state.student_data = student
+            st.toast(f'Welcome Back {student["name"]}')
+            time.sleep(1)
+            st.rerun()
     if show_registration:
         with st.container(border=True):
             st.header('Register new Profile')
@@ -195,36 +230,83 @@ def student_screen():
                             )
                             return
 
-                        if encodings:
-                            face_emb = encodings[0].tolist()
+                        if len(encodings) != 1:
+                            if encodings:
+                                st.warning(
+                                    'Only one face can be registered at a time. '
+                                    'Please capture a photo with one face.'
+                                )
+                            else:
+                                st.error('Could not capture facial features for registration')
+                            return
 
-                            voice_emb = None
-                            if audio_data:
-                                voice_emb = get_voice_embedding(audio_data.read())
+                        face_emb = encodings[0].tolist()
+                        try:
+                            existing_students = get_all_students()
+                            existing_match = match_registered_face(
+                                encodings[0], existing_students
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Duplicate face enrollment check failed in "
+                                "src.screens.student_screen.student_screen"
+                            )
+                            st.error(
+                                "Existing profiles could not be checked. The new "
+                                "profile was not created; please retry."
+                            )
+                            return
 
+                        if existing_match["status"] == "matched":
+                            st.warning(
+                                "This face is already registered to a student profile. "
+                                "Sign in with that profile or contact support."
+                            )
+                            return
+                        if existing_match["status"] == "ambiguous":
+                            st.warning(
+                                "This face matches multiple existing profiles. "
+                                "Registration was stopped; please contact support."
+                            )
+                            return
+
+                        voice_emb = None
+                        if audio_data:
+                            voice_emb = get_voice_embedding(audio_data.read())
+
+                        try:
                             response_data = create_student(new_name, face_embedding=face_emb, voice_embedding=voice_emb)
+                        except Exception:
+                            logger.exception(
+                                "Student profile creation failed in "
+                                "src.screens.student_screen.student_screen"
+                            )
+                            st.error(
+                                "The student profile could not be saved. Please retry."
+                            )
+                            return
 
-                            if response_data:
-                                try:
-                                    train_classifier()
-                                except Exception:
-                                    logger.exception(
-                                        "Face classifier initialization failed in "
-                                        "src.screens.student_screen.student_screen"
-                                    )
-                                    st.error(
-                                        "Your profile was saved, but face recognition "
-                                        "could not be initialized. Please contact support."
-                                    )
-                                    return
-                                st.session_state.is_logged_in = True
-                                st.session_state.user_role = 'student'
-                                st.session_state.student_data = response_data[0]
-                                st.toast(f'Profile Created! Hi {new_name}!')
-                                time.sleep(1)
-                                st.rerun()
+                        if response_data:
+                            try:
+                                refresh_face_model()
+                            except Exception:
+                                logger.exception(
+                                    "Face model refresh failed in "
+                                    "src.screens.student_screen.student_screen"
+                                )
+                                st.error(
+                                    "Your profile was saved, but face recognition "
+                                    "could not be initialized. Please contact support."
+                                )
+                                return
+                            st.session_state.is_logged_in = True
+                            st.session_state.user_role = 'student'
+                            st.session_state.student_data = response_data[0]
+                            st.toast(f'Profile Created! Hi {response_data[0]["name"]}!')
+                            time.sleep(1)
+                            st.rerun()
                         else:
-                            st.error('Couldnt capture your facial features for registration')
+                            st.error('Student profile was not saved; please retry.')
 
                 else:
                     st.warning('Please enter your name!')

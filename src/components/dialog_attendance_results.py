@@ -87,9 +87,15 @@ def _discard_review(state):
     state.pop(_SAVED_REVIEW_KEY, None)
     state["voice_attendance_results"] = None
     state["attendance_images"] = []
+    state["attendance_photo_decode_failures"] = 0
 
 
-def show_attendance_result(df, logs, allow_manual_correction=True):
+def show_attendance_result(
+    df,
+    logs,
+    allow_manual_correction=True,
+    analysis_summary=None,
+):
     rows = _records_from_table(df)
     logs = [dict(log) for log in logs]
     if not rows or not logs:
@@ -158,6 +164,41 @@ def show_attendance_result(df, logs, allow_manual_correction=True):
         )
     else:
         st.write("Review each student's status before confirming attendance.")
+
+    if analysis_summary is not None:
+        uploaded = int(analysis_summary.get("photos_uploaded", 0))
+        processed = int(analysis_summary.get("photos_processed", 0))
+        failed = int(analysis_summary.get("photos_failed", 0))
+        faces = int(analysis_summary.get("faces_detected", 0))
+        matched = int(analysis_summary.get("unique_students_matched", 0))
+        unknown = int(analysis_summary.get("unknown_faces", 0))
+        ambiguous = int(analysis_summary.get("ambiguous_faces", 0))
+        st.info(
+            f"Photo analysis: {uploaded} uploaded, {processed} processed, "
+            f"{failed} failed; {faces} faces detected; {matched} unique "
+            f"students matched; {unknown} unknown and {ambiguous} ambiguous faces. "
+            "Detected status is separate from editable final status."
+        )
+        for photo in analysis_summary.get("photos", []):
+            if photo["status"] == "failed":
+                st.caption(
+                    f"Photo {photo['photo_number']}: processing failed "
+                    f"({photo.get('error', 'unknown error')})."
+                )
+            else:
+                st.caption(
+                    f"Photo {photo['photo_number']}: {photo['face_count']} faces "
+                    f"detected, {photo['unknown_faces']} unknown, "
+                    f"{photo['ambiguous_faces']} ambiguous."
+                )
+        upload_failures = int(
+            analysis_summary.get("upload_decode_failures", 0)
+        )
+        if upload_failures:
+            st.caption(
+                f"{upload_failures} uploaded photo(s) could not be decoded "
+                "and were skipped."
+            )
 
     # Search filter field
     search_query = ""
@@ -317,5 +358,5 @@ def show_attendance_result(df, logs, allow_manual_correction=True):
 
 
 @st.dialog("Attendance Review", width="large")
-def attendance_result_dialog(df, logs):
-    show_attendance_result(df, logs)
+def attendance_result_dialog(df, logs, analysis_summary=None):
+    show_attendance_result(df, logs, analysis_summary=analysis_summary)

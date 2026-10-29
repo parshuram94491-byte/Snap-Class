@@ -22,9 +22,11 @@ from src.components.dialog_create_subject import create_subject_dialog
 from src.components.dialog_share_subject import share_subject_dialog
 from src.components.dialog_add_photo import add_photos_dialog
 
-from src.pipelines.face_pipeline import predict_attendance
+from src.pipelines.face_pipeline import (
+    analyze_attendance_images,
+    build_attendance_review_records,
+)
 from src.components.dialog_attendance_results import attendance_result_dialog
-import numpy as np
 
 from datetime import datetime
 
@@ -118,6 +120,8 @@ def teacher_tab_take_attendance():
 
     if 'attendance_images' not in st.session_state:
         st.session_state.attendance_images = []
+    if "attendance_photo_decode_failures" not in st.session_state:
+        st.session_state.attendance_photo_decode_failures = 0
 
     subjects = get_teacher_subjects(teacher_id)
 
@@ -147,29 +151,45 @@ def teacher_tab_take_attendance():
         for idx, img in enumerate(st.session_state.attendance_images):
             with gallery_cols[idx % 4 ]:
                 st.image(img, width='stretch', caption=f'Photo {idx+1}')
-    has_photos = bool(st.session_state.attendance_images)
+    has_photos = bool(
+        st.session_state.attendance_images
+        or st.session_state.attendance_photo_decode_failures
+    )
     c1, c2, c3 = st.columns(3)
 
     with c1:
         if st.button('Clear all photos', width='stretch', type='tertiary', icon=':material/delete:', disabled=not has_photos):
             st.session_state.attendance_images = []
+            st.session_state.attendance_photo_decode_failures = 0
             st.rerun()
 
 
     with c2:
         
         if st.button('Run Face Analysis', width='stretch', type='secondary', icon=':material/analytics:', disabled=not has_photos):
-            all_detected_ids = {}
             try:
                 with st.spinner('Deep scanning classroom photos...'):
-                    for idx, img in enumerate(st.session_state.attendance_images):
-                        img_np = np.array(img.convert('RGB'))
-                        detected, _, _ = predict_attendance(img_np)
-
-                        if detected:
-                            for sid in detected.keys():
-                                student_id = int(sid)
-                                all_detected_ids.setdefault(student_id, []).append(f"Photo {idx+1}")
+                    analysis = analyze_attendance_images(
+                        st.session_state.attendance_images
+                    )
+                    decode_failures = st.session_state.get(
+                        "attendance_photo_decode_failures", 0
+                    )
+                    if decode_failures:
+                        analysis["photos_uploaded"] += decode_failures
+                        analysis["photos_failed"] += decode_failures
+                        analysis["upload_decode_failures"] = decode_failures
+                        analysis["photos"].extend(
+                            {
+                                "photo_number": f"Skipped {index + 1}",
+                                "status": "failed",
+                                "face_count": 0,
+                                "unknown_faces": 0,
+                                "ambiguous_faces": 0,
+                                "error": "image decode failed",
+                            }
+                            for index in range(decode_failures)
+                        )
             except Exception:
                 logger.exception(
                     "Face attendance analysis failed in "
@@ -181,35 +201,32 @@ def teacher_tab_take_attendance():
                 )
                 return
 
+            if analysis["photos_processed"] == 0:
+                st.error(
+                    "No photos could be processed. Check the images and retry; "
+                    "attendance review was not opened."
+                )
+                return
+
             enrolled_res = supabase.table('subject_students').select("*, students(*)").eq('subject_id',selected_subject_id ).execute()
             enrolled_students = enrolled_res.data
 
             if not enrolled_students:
                 st.warning('No students enrolled in this course')
             else:
-                results, attendance_to_log = [], []
                 current_timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+                results, attendance_to_log = build_attendance_review_records(
+                    enrolled_students,
+                    analysis,
+                    selected_subject_id,
+                    current_timestamp,
+                )
 
-                for node in enrolled_students:
-                    student = node['students']
-                    sources = all_detected_ids.get(int(student['student_id']), [])
-                    is_present = len(sources) > 0
-
-                    results.append({
-                        "Name": student['name'],
-                        "ID": student['student_id'],
-                        "Source": ", ".join(sources) if is_present else "-",
-                        "Status": "✅ Present" if is_present else "❌ Absent"
-                    })
-
-                    attendance_to_log.append({
-                        'student_id': student['student_id'],
-                        'subject_id': selected_subject_id,
-                        'timestamp': current_timestamp,
-                        'is_present': bool(is_present)
-                    })
-
-                attendance_result_dialog(results, attendance_to_log)
+                attendance_result_dialog(
+                    results,
+                    attendance_to_log,
+                    analysis_summary=analysis,
+                )
 
     with c3:
         if st.button('Use Voice Attendance', type='primary', width='stretch', icon=':material/mic:'):

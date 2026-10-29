@@ -151,6 +151,8 @@ class FakeStreamlit:
         self.selected_values = selected_values or {}
         self.errors = []
         self.successes = []
+        self.infos = []
+        self.captions = []
         self.selectbox_calls = 0
 
     def columns(self, spec):
@@ -163,8 +165,11 @@ class FakeStreamlit:
     def write(self, _value):
         return None
 
-    def caption(self, _value):
-        return None
+    def caption(self, value):
+        self.captions.append(value)
+
+    def info(self, value):
+        self.infos.append(value)
 
     def button(self, label, **kwargs):
         return label in self.clicked and not kwargs.get("disabled", False)
@@ -441,6 +446,54 @@ class AttendanceReviewDialogTests(unittest.TestCase):
         self.assertEqual(
             [row["is_present"] for row in save.call_args.args[0]],
             [False, True],
+        )
+
+    def test_face_analysis_summary_is_shown_without_changing_detected_statuses(self):
+        summary = {
+            "photos_uploaded": 3,
+            "photos_processed": 2,
+            "photos_failed": 1,
+            "faces_detected": 5,
+            "unique_students_matched": 2,
+            "unknown_faces": 1,
+            "ambiguous_faces": 1,
+            "photos": [
+                {
+                    "photo_number": 1,
+                    "status": "processed",
+                    "face_count": 3,
+                    "unknown_faces": 1,
+                    "ambiguous_faces": 0,
+                },
+                {
+                    "photo_number": 2,
+                    "status": "failed",
+                    "face_count": 0,
+                    "unknown_faces": 0,
+                    "ambiguous_faces": 0,
+                    "error": "OSError",
+                },
+            ],
+        }
+        ui = FakeStreamlit(self.state)
+        with patch.object(attendance_review, "st", ui):
+            with patch.object(attendance_review, "create_attendance"):
+                attendance_review.show_attendance_result(
+                    self.rows,
+                    self.logs,
+                    analysis_summary=summary,
+                )
+
+        self.assertIn("3 uploaded, 2 processed, 1 failed", ui.infos[0])
+        self.assertIn("2 unique students matched", ui.infos[0])
+        self.assertTrue(any("Photo 1: 3 faces" in item for item in ui.captions))
+        self.assertTrue(any("Photo 2: processing failed" in item for item in ui.captions))
+        self.assertEqual(
+            self.state[
+                f"{attendance_review._REVIEW_STATUS_PREFIX}"
+                f"{attendance_review._review_session_id(self.rows, self.logs)}_1"
+            ],
+            "Absent",
         )
 
 

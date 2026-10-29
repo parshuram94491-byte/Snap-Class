@@ -34,6 +34,26 @@ class FakeFaceRecognizer:
         return np.zeros(face_pipeline.FACE_EMBEDDING_DIM)
 
 
+class FakeRectangle:
+    def __init__(self, left, top, right, bottom):
+        self._left = left
+        self._top = top
+        self._right = right
+        self._bottom = bottom
+
+    def left(self):
+        return self._left
+
+    def top(self):
+        return self._top
+
+    def right(self):
+        return self._right
+
+    def bottom(self):
+        return self._bottom
+
+
 class PrepareDlibImageTests(unittest.TestCase):
     def test_rgb_uint8_is_preserved(self):
         image = np.full((3, 5, 3), 17, dtype=np.uint8)
@@ -83,27 +103,6 @@ class PrepareDlibImageTests(unittest.TestCase):
 
         self.assertIn(
             "src.pipelines.face_pipeline.get_face_embeddings",
-            captured.output[0],
-        )
-        self.assertIn("Traceback (most recent call last)", captured.output[0])
-
-    def test_classifier_training_failure_is_logged_and_reraised(self):
-        students = [
-            {"student_id": 101, "face_embedding": np.zeros(128).tolist()},
-            {"student_id": 202, "face_embedding": np.ones(128).tolist()},
-        ]
-        with patch.object(face_pipeline, "get_all_students", return_value=students):
-            with patch.object(
-                face_pipeline.SVC,
-                "fit",
-                side_effect=ValueError("classifier test failure"),
-            ):
-                with self.assertLogs(face_pipeline.logger, level="ERROR") as captured:
-                    with self.assertRaisesRegex(ValueError, "classifier test failure"):
-                        face_pipeline.get_trained_model()
-
-        self.assertIn(
-            "src.pipelines.face_pipeline.get_trained_model",
             captured.output[0],
         )
         self.assertIn("Traceback (most recent call last)", captured.output[0])
@@ -214,6 +213,46 @@ class FacePipelineTests(unittest.TestCase):
         self.assertIs(detector.image, recognizer.image)
         self.assertEqual(detector.image.shape, (20, 30, 3))
 
+    def test_multiscale_detection_keeps_small_faces_and_suppresses_duplicate_boxes(self):
+        large_one = FakeRectangle(10, 10, 30, 30)
+        large_two = FakeRectangle(50, 10, 70, 30)
+        small_face = FakeRectangle(90, 10, 98, 18)
+        repeated_one = FakeRectangle(11, 11, 30, 30)
+
+        class MultiScaleDetector:
+            def __init__(self):
+                self.upsamples = []
+
+            def __call__(self, _image, upsample):
+                self.upsamples.append(upsample)
+                return {
+                    1: [large_one, large_two],
+                    2: [repeated_one, large_two, small_face],
+                }[upsample]
+
+        class CountingRecognizer(FakeFaceRecognizer):
+            def __init__(self):
+                super().__init__()
+                self.descriptor_count = 0
+
+            def compute_face_descriptor(self, image, shape, num_jitters):
+                self.descriptor_count += 1
+                return super().compute_face_descriptor(image, shape, num_jitters)
+
+        detector = MultiScaleDetector()
+        recognizer = CountingRecognizer()
+        image = np.zeros((120, 120, 3), dtype=np.uint8)
+        with patch.object(
+            face_pipeline,
+            "load_dlib_models",
+            return_value=(detector, FakeShapePredictor(), recognizer),
+        ):
+            encodings = face_pipeline.get_face_embeddings(image)
+
+        self.assertEqual(detector.upsamples, [1, 2])
+        self.assertEqual(len(encodings), 3)
+        self.assertEqual(recognizer.descriptor_count, 3)
+
     def test_empty_student_database_is_safe(self):
         with patch.object(face_pipeline, "get_all_students", return_value=[]):
             model = face_pipeline.get_trained_model()
@@ -233,7 +272,6 @@ class FacePipelineTests(unittest.TestCase):
         ):
             model = face_pipeline.get_trained_model()
 
-        self.assertIsNone(model["clf"])
         with patch.object(face_pipeline, "get_trained_model", return_value=model):
             with patch.object(
                 face_pipeline, "get_face_embeddings", return_value=[near_known]
@@ -261,7 +299,6 @@ class FacePipelineTests(unittest.TestCase):
         with patch.object(face_pipeline, "get_all_students", return_value=students):
             model = face_pipeline.get_trained_model()
 
-        self.assertIsNotNone(model["clf"])
         first_query = first.copy()
         first_query[0] = 0.1
         second_query = second.copy()
@@ -288,6 +325,212 @@ class FacePipelineTests(unittest.TestCase):
                     self.assertEqual(detected, expected)
                     self.assertEqual(student_ids, [101, 202])
                     self.assertEqual(face_count, 1)
+
+    def test_registered_parshuram_face_resolves_to_parshuram_record(self):
+        first = np.zeros(128)
+        second = np.ones(128)
+        students = [
+            {
+                "student_id": 101,
+                "name": "Parshuram",
+                "face_embedding": first.tolist(),
+            },
+            {
+                "student_id": 202,
+                "name": "Friend",
+                "face_embedding": second.tolist(),
+            },
+        ]
+        query = first.copy()
+        query[0] = 0.1
+
+        with patch.object(face_pipeline, "get_all_students", return_value=students):
+            with patch.object(
+                face_pipeline, "get_face_embeddings", return_value=[query]
+            ):
+                match = face_pipeline.identify_student(
+                    np.zeros((2, 2, 3), dtype=np.uint8)
+                )
+
+        self.assertEqual(match["status"], "matched")
+        self.assertEqual(match["student"], {"student_id": 101, "name": "Parshuram"})
+
+    def test_second_students_face_resolves_to_second_students_record(self):
+        first = np.zeros(128)
+        second = np.zeros(128)
+        second[0] = 2.0
+        students = [
+            {
+                "student_id": 101,
+                "name": "Parshuram",
+                "face_embedding": first.tolist(),
+            },
+            {
+                "student_id": 202,
+                "name": "Friend",
+                "face_embedding": second.tolist(),
+            },
+        ]
+        query = second.copy()
+        query[0] = 1.9
+
+        with patch.object(face_pipeline, "get_all_students", return_value=students):
+            with patch.object(
+                face_pipeline, "get_face_embeddings", return_value=[query]
+            ):
+                match = face_pipeline.identify_student(
+                    np.zeros((2, 2, 3), dtype=np.uint8)
+                )
+
+        self.assertEqual(match["status"], "matched")
+        self.assertEqual(match["student"]["student_id"], 202)
+        self.assertEqual(match["student"]["name"], "Friend")
+
+    def test_display_identity_is_from_the_matched_student_record(self):
+        first = np.zeros(128)
+        second = np.ones(128)
+        students = [
+            {
+                "student_id": 101,
+                "name": "Parshuram",
+                "face_embedding": first.tolist(),
+            },
+            {
+                "student_id": 202,
+                "name": "Friend",
+                "face_embedding": second.tolist(),
+            },
+        ]
+
+        result = face_pipeline.match_registered_face(first, students)
+
+        self.assertEqual(result["student"]["student_id"], 101)
+        self.assertEqual(result["student"]["name"], "Parshuram")
+        self.assertEqual(result["student"], {
+            "student_id": students[0]["student_id"],
+            "name": students[0]["name"],
+        })
+
+    def test_ambiguous_match_does_not_return_an_identity(self):
+        first = np.zeros(128)
+        second = first.copy()
+        second[0] = 0.2
+        students = [
+            {
+                "student_id": 101,
+                "name": "Parshuram",
+                "face_embedding": first.tolist(),
+            },
+            {
+                "student_id": 202,
+                "name": "Friend",
+                "face_embedding": second.tolist(),
+            },
+        ]
+        query = first.copy()
+        query[0] = 0.1
+
+        result = face_pipeline.match_registered_face(query, students)
+
+        self.assertEqual(result["status"], "ambiguous")
+        self.assertIsNone(result["student"])
+        self.assertEqual(result["candidate_count"], 2)
+
+    def test_match_result_ranks_distinct_students_and_counts_threshold_matches(self):
+        first = np.zeros(128)
+        second = first.copy()
+        second[0] = 0.3
+        third = first.copy()
+        third[0] = 1.2
+        model_data = face_pipeline._build_model_data(
+            [
+                {"student_id": 101, "name": "First", "face_embedding": first.tolist()},
+                {"student_id": 202, "name": "Second", "face_embedding": second.tolist()},
+                {"student_id": 303, "name": "Third", "face_embedding": third.tolist()},
+            ]
+        )
+
+        result = face_pipeline.match_face_embedding(first, model_data)
+
+        self.assertEqual(result["status"], "ambiguous")
+        self.assertEqual(result["candidate_count"], 3)
+        self.assertEqual(result["candidate_record_count"], 3)
+        self.assertEqual(result["candidates_within_threshold"], 2)
+        self.assertEqual(result["best_distance"], 0.0)
+        self.assertAlmostEqual(result["second_best_distance"], 0.3)
+
+    def test_repeated_records_for_same_student_count_as_one_candidate(self):
+        first = np.zeros(128)
+        second = first.copy()
+        second[0] = 0.2
+        model_data = face_pipeline._build_model_data(
+            [
+                {"student_id": 101, "name": "First", "face_embedding": first.tolist()},
+                {"student_id": 101, "name": "First", "face_embedding": second.tolist()},
+            ]
+        )
+
+        result = face_pipeline.match_face_embedding(first, model_data)
+
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["candidate_count"], 1)
+        self.assertEqual(result["candidate_record_count"], 2)
+        self.assertEqual(result["candidates_within_threshold"], 1)
+        self.assertEqual(result["student"]["student_id"], 101)
+
+    def test_multiple_embeddings_for_one_student_do_not_create_identity_ambiguity(self):
+        first = np.zeros(128)
+        second = np.ones(128)
+        query = first.copy()
+        query[0] = 0.1
+        student_records = [
+            {
+                "student_id": 101,
+                "name": "Parshuram",
+                "face_embedding": first.tolist(),
+            },
+            {
+                "student_id": 101,
+                "name": "Parshuram",
+                "face_embedding": second.tolist(),
+            },
+        ]
+
+        result = face_pipeline.match_registered_face(query, student_records)
+
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["student"]["student_id"], 101)
+        self.assertEqual(result["student"]["name"], "Parshuram")
+
+    def test_failed_database_lookup_raises_without_fallback_identity(self):
+        query = np.zeros(128)
+        with patch.object(
+            face_pipeline, "get_all_students", side_effect=RuntimeError("database down")
+        ):
+            with patch.object(
+                face_pipeline, "get_face_embeddings", return_value=[query]
+            ):
+                with self.assertRaisesRegex(RuntimeError, "database down"):
+                    face_pipeline.identify_student(
+                        np.zeros((2, 2, 3), dtype=np.uint8)
+                    )
+
+    def test_duplicate_registration_match_is_not_unknown(self):
+        known = np.zeros(128)
+        query = known.copy()
+        query[0] = 0.1
+        students = [
+            {
+                "student_id": 101,
+                "name": "Parshuram",
+                "face_embedding": known.tolist(),
+            }
+        ]
+
+        result = face_pipeline.match_registered_face(query, students)
+
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["student"]["student_id"], 101)
 
     def test_actual_dlib_detects_on_valid_uint8_image_when_models_available(self):
         try:
