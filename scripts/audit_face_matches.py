@@ -11,6 +11,7 @@ from PIL import Image
 
 from src.database.config import supabase
 from src.pipelines.face_pipeline import (
+    FACE_AMBIGUITY_THRESHOLD,
     FACE_EMBEDDING_DIM,
     FACE_MATCH_THRESHOLD,
     get_face_embeddings,
@@ -110,7 +111,7 @@ def find_close_student_pairs(rows):
                 for first_embedding in embeddings_by_id[first_key]
                 for second_embedding in embeddings_by_id[second_key]
             )
-            if distance <= FACE_MATCH_THRESHOLD:
+            if distance <= FACE_AMBIGUITY_THRESHOLD:
                 pairs.append(
                     (original_ids[first_key], original_ids[second_key], distance)
                 )
@@ -164,6 +165,11 @@ def analyze_face(image_path, rows):
             for candidate in candidates
             if candidate["distance"] <= FACE_MATCH_THRESHOLD
         ]
+        ambiguous_matches = [
+            candidate
+            for candidate in candidates
+            if candidate["distance"] <= FACE_AMBIGUITY_THRESHOLD
+        ]
         results.append(
             {
                 "face_processing_id": uuid4().hex[:12],
@@ -173,10 +179,15 @@ def analyze_face(image_path, rows):
                     candidates[1]["distance"] if len(candidates) > 1 else None
                 ),
                 "candidates_within_threshold": len(matches),
+                "candidates_within_ambiguity_threshold": len(ambiguous_matches),
                 "status": (
                     "ambiguous"
-                    if len(matches) > 1
-                    else ("matched" if len(matches) == 1 else "unknown")
+                    if len(ambiguous_matches) > 1
+                    else (
+                        "matched"
+                        if len(matches) == 1 and len(ambiguous_matches) == 1
+                        else "unknown"
+                    )
                 ),
                 "exact_embedding_pairs": exact_pairs,
                 "near_identical_embedding_pairs": near_pairs,

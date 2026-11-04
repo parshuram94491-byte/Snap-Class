@@ -151,9 +151,11 @@ class FakeStreamlit:
         self.selected_values = selected_values or {}
         self.errors = []
         self.successes = []
+        self.toasts = []
         self.infos = []
         self.captions = []
         self.selectbox_calls = 0
+        self.rerun_calls = 0
 
     def columns(self, spec):
         count = len(spec) if isinstance(spec, (list, tuple)) else spec
@@ -180,7 +182,11 @@ class FakeStreamlit:
     def success(self, message):
         self.successes.append(message)
 
+    def toast(self, message):
+        self.toasts.append(message)
+
     def rerun(self):
+        self.rerun_calls += 1
         return None
 
 
@@ -373,7 +379,7 @@ class AttendanceReviewDialogTests(unittest.TestCase):
             "teacher_data": {"teacher_id": 99},
         }
 
-    def test_confirm_saves_selected_statuses_once_and_shows_success(self):
+    def test_confirm_saves_once_closes_review_and_shows_success_toast(self):
         ui = FakeStreamlit(
             self.state,
             clicked={"Confirm & Save"},
@@ -392,11 +398,12 @@ class AttendanceReviewDialogTests(unittest.TestCase):
         self.assertEqual([row["is_present"] for row in final_rows], [True, False])
         self.assertEqual([row["student_id"] for row in final_rows], [1, 2])
         self.assertEqual(save.call_args.kwargs, {"teacher_id": 99})
-        self.assertTrue(ui.successes)
-        self.assertEqual(
-            self.state[attendance_review._SAVED_REVIEW_KEY],
-            attendance_review._review_session_id(self.rows, self.logs),
-        )
+        self.assertEqual(ui.successes, [])
+        self.assertEqual(ui.toasts, ["Attendance saved successfully."])
+        self.assertEqual(ui.rerun_calls, 1)
+        self.assertNotIn(attendance_review._ACTIVE_REVIEW_KEY, self.state)
+        self.assertNotIn(attendance_review._SAVED_REVIEW_KEY, self.state)
+        self.assertEqual(self.state["attendance_images"], [])
 
     def test_database_failure_keeps_review_and_does_not_show_success(self):
         ui = FakeStreamlit(self.state, clicked={"Confirm & Save"})

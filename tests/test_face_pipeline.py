@@ -288,6 +288,27 @@ class FacePipelineTests(unittest.TestCase):
                     {},
                 )
 
+    def test_face_distance_above_strict_threshold_is_not_marked_present(self):
+        known = np.zeros(face_pipeline.FACE_EMBEDDING_DIM)
+        marginal_query = known.copy()
+        marginal_query[0] = 0.5
+        model_data = face_pipeline._build_model_data(
+            [
+                {
+                    "student_id": 101,
+                    "name": "Student",
+                    "face_embedding": known.tolist(),
+                }
+            ]
+        )
+
+        result = face_pipeline.match_face_embedding(marginal_query, model_data)
+
+        self.assertEqual(face_pipeline.FACE_MATCH_THRESHOLD, 0.45)
+        self.assertEqual(result["status"], "unknown")
+        self.assertIsNone(result["student"])
+        self.assertAlmostEqual(result["best_distance"], 0.5)
+
     def test_multiple_students_match_correctly_and_unknown_is_rejected(self):
         first = np.zeros(128)
         second = np.zeros(128)

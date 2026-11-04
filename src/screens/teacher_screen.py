@@ -7,30 +7,8 @@ from src.ui.base_layout import style_background_dashboard, style_base_layout
 
 from src.components.header import header_dashboard
 from src.components.footer import footer_dashboard
-from src.components.subject_card import subject_card
-from src.database.db import (
-    check_teacher_exists,
-    create_teacher,
-    teacher_login,
-    get_teacher_subjects,
-    get_attendance_for_teacher,
-    get_teacher_attendance_sessions,
-    get_attendance_session_rows,
-    build_attendance_export_file,
-)
-from src.components.dialog_create_subject import create_subject_dialog
-from src.components.dialog_share_subject import share_subject_dialog
-from src.components.dialog_add_photo import add_photos_dialog
-
-from src.pipelines.face_pipeline import (
-    analyze_attendance_images,
-    build_attendance_review_records,
-)
-from src.components.dialog_attendance_results import attendance_result_dialog
 
 from datetime import datetime
-
-from src.database.config import supabase
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +88,8 @@ def teacher_dashboard():
     footer_dashboard()
 
 def teacher_tab_take_attendance():
+    from src.database.db import get_teacher_subjects
+
     teacher_id = st.session_state.teacher_data['teacher_id']
     st.markdown(
         '<h1 class="dashboard-page-title">Take '
@@ -138,6 +118,8 @@ def teacher_tab_take_attendance():
 
     with col2:
         if st.button('Add Photos', type='primary', icon=':material/photo_prints:', width='stretch'):
+            from src.components.dialog_add_photo import add_photos_dialog
+
             add_photos_dialog()
 
     selected_subject_id = subject_options[selected_subject_label]
@@ -168,6 +150,12 @@ def teacher_tab_take_attendance():
         
         if st.button('Run Face Analysis', width='stretch', type='secondary', icon=':material/analytics:', disabled=not has_photos):
             try:
+                from src.pipelines.face_pipeline import (
+                    analyze_attendance_images,
+                    build_attendance_review_records,
+                )
+                from src.database.config import supabase
+
                 with st.spinner('Deep scanning classroom photos...'):
                     analysis = analyze_attendance_images(
                         st.session_state.attendance_images
@@ -222,6 +210,10 @@ def teacher_tab_take_attendance():
                     current_timestamp,
                 )
 
+                from src.components.dialog_attendance_results import (
+                    attendance_result_dialog,
+                )
+
                 attendance_result_dialog(
                     results,
                     attendance_to_log,
@@ -245,6 +237,11 @@ def teacher_tab_take_attendance():
 
 
 def teacher_tab_manage_subjects():
+    from src.components.subject_card import subject_card
+    from src.components.dialog_create_subject import create_subject_dialog
+    from src.components.dialog_share_subject import share_subject_dialog
+    from src.database.db import get_teacher_subjects
+
     teacher_id = st.session_state.teacher_data['teacher_id']
     col1, col2 = st.columns(2)
     with col1:
@@ -280,6 +277,13 @@ def teacher_tab_manage_subjects():
 
 
 def teacher_tab_attendance_records():
+    from src.database.db import (
+        build_attendance_export_file,
+        get_attendance_for_teacher,
+        get_attendance_session_rows,
+        get_teacher_attendance_sessions,
+    )
+
     st.header('Attendance Records')
 
     teacher_id = st.session_state.teacher_data['teacher_id']
@@ -370,7 +374,9 @@ def teacher_tab_attendance_records():
 def login_teacher(username, password):
     if not username or not password:
         return False
-    
+
+    from src.database.db import teacher_login
+
     teacher = teacher_login(username, password)
 
     if teacher:
@@ -407,8 +413,6 @@ def teacher_screen_login():
         if st.button('Login', icon=':material/passkey:', shortcut='control+enter', width='stretch'):
             if login_teacher(teacher_username, teacher_pass):
                 st.toast("welcome back!", icon="👋")
-                import time
-                time.sleep(1)
                 st.rerun()
             else:
                 st.error("Invalid username and password combo")
@@ -424,6 +428,9 @@ def teacher_screen_login():
 def register_teacher(teacher_username, teacher_name, teacher_pass, teacher_pass_confirm):
     if not teacher_username or not teacher_name or not teacher_pass:
         return False, "All Fields are required!"
+
+    from src.database.db import check_teacher_exists, create_teacher
+
     if check_teacher_exists(teacher_username):
         return False, "Username already taken"
     if teacher_pass != teacher_pass_confirm:

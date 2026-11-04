@@ -353,8 +353,9 @@ def show_attendance_result(
                         f"{exc}"
                     )
                 else:
-                    st.session_state[_SAVED_REVIEW_KEY] = session_id
-                    st.success("Attendance saved successfully.")
+                    st.toast("Attendance saved successfully.")
+                    _discard_review(st.session_state)
+                    st.rerun()
 
 
 @st.dialog("Attendance Review", width="large")

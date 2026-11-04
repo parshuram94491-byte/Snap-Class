@@ -5,7 +5,11 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image
 
-from src.components.dialog_add_photo import decode_photo
+from src.components.dialog_add_photo import (
+    MAX_ATTENDANCE_PHOTOS,
+    _select_upload_batch,
+    decode_photo,
+)
 from src.pipelines import face_pipeline
 
 
@@ -165,6 +169,34 @@ class AttendanceAnalysisTests(unittest.TestCase):
         self.assertEqual(decoded.getpixel((0, 0)), (10, 20, 30))
         with self.assertRaises(Exception):
             decode_photo(io.BytesIO(b"not an image"))
+
+    def test_uploaded_image_decoder_bounds_large_photo_dimensions(self):
+        image_buffer = io.BytesIO()
+        Image.new("RGB", (4000, 2000), (10, 20, 30)).save(
+            image_buffer, format="JPEG"
+        )
+        image_buffer.seek(0)
+
+        decoded = decode_photo(image_buffer)
+
+        self.assertEqual(decoded.size, (1600, 800))
+        self.assertEqual(decoded.mode, "RGB")
+
+    def test_photo_upload_batches_cannot_exceed_attendance_limit(self):
+        uploaded_files = list(range(5))
+
+        selected, excess = _select_upload_batch(
+            uploaded_files, MAX_ATTENDANCE_PHOTOS - 2
+        )
+
+        self.assertEqual(selected, uploaded_files[:2])
+        self.assertEqual(excess, 3)
+
+    def test_photo_upload_batch_is_empty_when_limit_is_reached(self):
+        selected, excess = _select_upload_batch([1, 2], MAX_ATTENDANCE_PHOTOS)
+
+        self.assertEqual(selected, [])
+        self.assertEqual(excess, 2)
 
 
 if __name__ == "__main__":

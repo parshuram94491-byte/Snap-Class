@@ -3,8 +3,6 @@ import streamlit as st
 
 from src.screens.home_screen import home_screen
 
-from src.components.dialog_auto_enroll import auto_enroll_dialog
-
 def main():
     st.set_page_config(
         page_title='SnapClass - Making Attendance faster using AI',
@@ -34,5 +32,7 @@ def main():
             st.session_state.login_type = 'student'
             st.rerun()
         if st.session_state.get('is_logged_in') and st.session_state.get('user_role') == 'student':
+            from src.components.dialog_auto_enroll import auto_enroll_dialog
+
             auto_enroll_dialog(join_code)
 main()

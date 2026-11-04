@@ -10,7 +10,8 @@ from src.database.db import get_all_students
 
 logger = logging.getLogger(__name__)
 FACE_EMBEDDING_DIM = 128
-FACE_MATCH_THRESHOLD = 0.6
+FACE_MATCH_THRESHOLD = 0.45
+FACE_AMBIGUITY_THRESHOLD = 0.6
 
 
 @st.cache_resource
@@ -278,6 +279,11 @@ def match_face_embedding(encoding, model_data):
         for candidate in ranked_candidates
         if candidate[1] <= FACE_MATCH_THRESHOLD
     ]
+    ambiguity_candidates = [
+        candidate
+        for candidate in ranked_candidates
+        if candidate[1] <= FACE_AMBIGUITY_THRESHOLD
+    ]
     result = {
         "status": "unknown",
         "student": None,
@@ -289,12 +295,14 @@ def match_face_embedding(encoding, model_data):
         "candidate_count": len(ranked_candidates),
         "candidate_record_count": len(model_data["X"]),
         "candidates_within_threshold": len(matching_candidates),
+        "candidates_within_ambiguity_threshold": len(ambiguity_candidates),
         "threshold": FACE_MATCH_THRESHOLD,
+        "ambiguity_threshold": FACE_AMBIGUITY_THRESHOLD,
     }
 
-    if len(matching_candidates) > 1:
+    if len(ambiguity_candidates) > 1:
         result["status"] = "ambiguous"
-    elif len(matching_candidates) == 1:
+    elif len(matching_candidates) == 1 and len(ambiguity_candidates) == 1:
         student_key, distance = matching_candidates[0]
         result["status"] = "matched"
         result["student"] = model_data["students_by_id"][student_key]
